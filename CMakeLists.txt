@@ -74,5 +74,6 @@ target_link_libraries (hls_server
             pthread
             )
 
+add_subdirectory(test)
 enable_testing ()
 add_test (NAME MyTest COMMAND Test)

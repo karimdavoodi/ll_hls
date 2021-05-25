@@ -4,7 +4,10 @@
 #include <served/served.hpp>
 #include "redis_client.h"
 #include "config.h"
-
+/**
+ * @brief HLS server class
+ * 
+ */
 class Hls_server
 {
     private:
@@ -41,10 +44,15 @@ class Hls_server
      input -----> HlsGenerate --> to Redis
                                         ---> HlsServer
                 
-        key                         type     description
-        Lives_list                  list     names of lives channels     
-        Live_master:name            list     profiles of live 'name' 
-        Live_segment:name:P:N       binary   segment 'N' of profile 'P' of live 'name'     
+        key                             type     description
+        Lives_list                      list     names of lives channels     
+        Live_master:name                list     profiles of live 'name' 
+                   profile as to_string()      
+        Live_single:name:P:last         string   the last segment     
+        Live_segment_duration:name:P:N  int   the segment duration     
+        Live_segment_data:name:P:N       binary   the segment data     
+                    P -> video_bitrate as ID
+                    N -> segment sequence number
         Live_psegment:name:P:N:M    binary   partial segment 'M' of segment 'N' 
                                                             of profile 'P' of live 'name'     
 
