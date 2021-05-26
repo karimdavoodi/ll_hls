@@ -26,7 +26,11 @@ class RedisClient{
         void sadd(const string& key, const string& val);
         std::vector<string> smembers(const string& key);
         string get(const string& key);
-        int get_int(const string& key) { return stoi(get(key)); };
+        int get_int(const string& key) { 
+            string val = get(key);
+            if(val.empty()) return -1;
+            else return stoi(val);
+             };
         void close();
         static string unique_name(const string);
         ~RedisClient();

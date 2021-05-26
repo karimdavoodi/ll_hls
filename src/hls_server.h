@@ -43,19 +43,21 @@ class Hls_server
  
      input -----> HlsGenerate --> to Redis
                                         ---> HlsServer
-                
-        key                             type     description
-        Lives_list                      list     names of lives channels     
-        Live_master:name                list     profiles of live 'name' 
-                   profile as to_string()      
-        Live_single:name:P:last         string   the last segment     
-        Live_segment_duration:name:P:N  int   the segment duration     
-        Live_segment_data:name:P:N       binary   the segment data     
-                    P -> video_bitrate as ID
-                    N -> segment sequence number
-        Live_psegment:name:P:N:M    binary   partial segment 'M' of segment 'N' 
-                                                            of profile 'P' of live 'name'     
+                  
+        key                                 type     description
+        Lives_list                          list     names of lives channels     
+        Live_master:name                    list     profiles of live 'name' 
+        Live_single:name:P:last_seg         int      the last segment     
+        Live_single:name:P:last_pseg        string   the last partial segment
+                                                     form: "N:M"        
+        Live_segment_duration:name:P:N      float    the segment duration     
+        Live_segment_data:name:P:N          binary   the segment data     
+        Live_segment_duration:name:P:N:M   float    the partial segment
+        Live_segment_data:name:P:N:M       binary   the partial segment
 
+                    P -> video_bitrate as ID
+                    N -> segment sequence number 
+                    M -> partial segment sequence number
         Client
 
         Get all lives playlist
@@ -74,7 +76,7 @@ class Hls_server
                     Client has header : Range: bytes=0-1023
                     Server response   : Content-Range: bytes 0-1023/146515
         Get partial segment  
-            path: /v1/cs/play/llhls/psegment/<name>/<profile>/<segment>
+            path: /v1/cs/play/llhls/psegment/<name>/<profile>/<segment>/<pseg>
 
  
   LL-HLS new features:
