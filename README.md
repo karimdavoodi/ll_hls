@@ -15,8 +15,8 @@ Cloud-Base Low-latency HLS
     It contain master playlist for each live 
 
 ### With Docker
+
     - HLS generator for any input:
-    ```
     docker run --network host            \
         -e INPUT_URL='rtsp://ip:port'    \
         -e REDIS_HOST='127.0.0.1'        \
@@ -26,22 +26,22 @@ Cloud-Base Low-latency HLS
         -e OUTPUT_PROFILE_2='SD'         \      # resolution 720x438
         -e OUTPUT_PROFILE_3='CD'         \      # resolution 320x240
         hls_generator
-    ```
+
     - Redis server:
-    ```
     docker run  -p 6379:6379             \
         -e REDIS_PASSWORD=123123         \
         bitnami/redis:6.2
-    ```
+
+
     - HLS Server:
-    ```
     docker run --network host            \
         -e REDIS_HOST='127.0.0.1'        \
         -e REDIS_PORT='6379'             \
         -e REDIS_PASS='123123'           \
-        -e SERVER_PORT='8088'            \ 
+        -e HLS_SERVER_PORT='8088'        \ 
         hls_server
-    ```
+
+
 ## TODO:
     - Support HLS base functionality
     - Support Adaptive bit rate

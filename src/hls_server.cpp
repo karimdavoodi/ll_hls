@@ -24,10 +24,10 @@ using namespace std;
  * @param address : address to bind 
  * @param _port : port to bind
  */
-void fill_redis();
 void Hls_server::start(const std::string address, int _port)
 {
 #ifdef TEST_ONLY
+    void fill_redis();
     fill_redis();
 #endif
     port = _port;
@@ -78,10 +78,10 @@ void Hls_server::init_routes()
 Hls_server::~Hls_server()
 {
     // disconnect redis connections
-    for (auto [id, redis] : redis_map)
+    for (auto &item : redis_map)
     {
-        if (redis)
-            redis->close();
+        if (item.second)
+            item.second->close();
     }
 }
 
@@ -122,9 +122,8 @@ void Hls_server::list_lives(served::response &res, const served::request &req)
     string playlist = "#EXTM3U\n#EXT-X-VERSION:3\n\n";
     for (auto live : lives_list)
     {
-        playlist += (boost::format("#EXTINF:,%s\n")%live).str();
-        playlist += (boost::format("%s/master/%s/play.m3u8\n\n") 
-                            % HLS_SERVER_API_BASE % live).str();
+        playlist += (boost::format("#EXTINF:,%s\n") % live).str();
+        playlist += (boost::format("%s/master/%s/play.m3u8\n\n") % HLS_SERVER_API_BASE % live).str();
     }
     res << playlist;
 }
@@ -146,72 +145,11 @@ void Hls_server::master_playlist(served::response &res, const served::request &r
     {
         Profile profile;
         profile.from_string(profile_str.c_str());
-        playlist += (boost::format("#EXT-X-STREAM-INF:%s\n")
-                            % profile.to_ext_x_stream_inf() ).str();
-        playlist += (boost::format("%s/single/%s/%d/play.m3u8\n\n") 
-                            % HLS_SERVER_API_BASE 
-                            % live_name
-                            % profile.get_video_bitrate()).str();
+        playlist += (boost::format("#EXT-X-STREAM-INF:%s\n") % profile.to_ext_x_stream_inf()).str();
+        playlist += (boost::format("%s/single/%s/%d/play.m3u8\n\n") % HLS_SERVER_API_BASE % live_name % profile.get_video_bitrate()).str();
     }
     res << playlist;
 }
-int redis_get_last_segment(
-        const string& name, 
-        const string& profile,
-        RedisClient* redis){
-    string key_last;
-    key_last = (boost::format("Live_segment:%s:%s:last_seg") % name % profile).str();
-    int last_seg = redis->get_int(key_last);
-    if (last_seg < 0) {
-        LOG(error) << "Can't get last segment number for " << name;
-        return -1;
-    } 
-    return last_seg;
-}
-
-std::pair<int,int> redis_get_last_partial_segment(
-        const string& name, 
-        const string& profile,
-        RedisClient* redis){
-    string key_last = (boost::format("Live_segment:%s:%s:last_pseg") % name % profile).str();
-    string last_p = redis->get(key_last);
-    auto it = last_p.find(':');
-    auto last_pseg = make_pair(-1, -1);
-    if (it != string::npos) {
-        last_pseg.first = stoi(last_p.substr(0, it - 1));
-        last_pseg.second = stoi(last_p.substr(it + 1));
-    }
-    return last_pseg;
-}
-string playlist_item_segment(
-       const string& name, 
-        const string& profile,
-        int segment_id,
-        RedisClient* redis){
-    string key_dur = (boost::format("Live_segment_duration:%s:%s:%d") 
-                        % name % profile % segment_id ).str(); 
-    string duration = redis->get(key_dur);
-    return (boost::format("#EXTINF:%s,\n") % duration).str() +
-           (boost::format("%s/segment/%s/%s/%d\n") 
-            % HLS_SERVER_API_BASE
-            % name % profile % segment_id ).str();
-}
-string playlist_item_psegment(
-       const string& name, 
-        const string& profile,
-        pair<int,int>& psegment_id,
-        RedisClient* redis){
-    string key_dur = (boost::format("Live_segment_duration:%s:%s:%d:%d") 
-                        % name % profile 
-                        % psegment_id.first % psegment_id.second ).str(); 
-    string duration = redis->get(key_dur);
-    return (boost::format("#EXT-X-PART:DURATION=%d,URI=\"%s/%s/%s/%d/%d\"\n") 
-            % duration
-            % HLS_SERVER_API_BASE
-            % name % profile 
-            % psegment_id.first % psegment_id.second ).str();
-}
- 
 /**
  * @brief return single playlist of live stream with name 'name'
  * PATH: HLS_SERVER_API_BASE/single/{name}/{profile}/play.m3u8
@@ -225,10 +163,24 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     string name = req.params.get("name");
     string profile = req.params.get("profile");
 
+    // Wait if requested segment is not ready!!!
+    string hls_msn = req.query.get("_HLS_msn");
+    if (!hls_msn.empty())
+    {
+        // TODO: implement in efficatin way!
+        int hls_msn_n = stoi(hls_msn);
+        while (true)
+            if (hls_msn_n > redis->get_last_segment(name, profile))
+                redis->wait(0.1);
+            else
+                break;
+    }
+
     // find last segment and partial segment
-    auto last_seg = redis_get_last_segment(name, profile, redis);
-    auto last_pseg = redis_get_last_partial_segment(name, profile, redis);
-    if(last_seg < 0 || last_pseg.first < 0 || last_pseg.second < 0){
+    auto last_seg = redis->get_last_segment(name, profile);
+    auto last_pseg = redis->get_last_partial_segment(name, profile);
+    if (last_seg < 0 || last_pseg.first < 0 || last_pseg.second < 0)
+    {
         LOG(error) << "Can't get last segment numbers from Redis for " << name;
         res << "Can't get last segment numbers from Redis for " << name;
         return;
@@ -237,27 +189,40 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     deque<string> playlist;
     int index = last_seg;
     // insert last segment if it is newer than partial segments
-    if (last_seg >= last_pseg.first){
-        playlist.push_front(playlist_item_segment(name, profile, last_seg, redis));
+    if (last_seg >= last_pseg.first)
+    {
+        playlist.push_front(redis->playlist_item_segment(name, profile, last_seg));
         --index;
     }
     // insert partial segments of last segment
-    for (size_t i = last_pseg.second; i >=0; --i){
-        playlist.push_front(playlist_item_psegment(name, profile, last_pseg, redis));
+    for (; last_pseg.second >= 0; --last_pseg.second)
+    {
+        playlist.push_front(redis->playlist_item_psegment(name, profile, last_pseg));
     }
-    // insert remain main segments
-    for (; index > 0 && index > (last_seg - 4); --index) {
-        playlist.push_front(playlist_item_segment(name, profile, index, redis));
-    }
-    string playlist_;
-    for(auto s : playlist) playlist_ += s; 
-    res << "#EXTM3U\n"
-        << "#EXT-X-VERSION:3\n\n"
-        << "#EXT-X-MEDIA-SEQUENCE:" << to_string(index) << "\n"
-        << "#EXT-X-TARGETDURATION:10\n" 
-        << "#EXT-X-PLAYLIST-TYPE:EVENT\n\n" 
-        << playlist_;
 
+    // insert remain 4 main segments if HLS_skip is not set
+    string hls_skip = req.query.get("_HLS_skip");
+    if (hls_skip.empty())
+    {
+        for (; index > 0 && index > (last_seg - 4); --index)
+        {
+            playlist.push_front(redis->playlist_item_segment(name, profile, index));
+        }
+    }
+    // Gather playlist ...
+    string playlist_;
+    for (auto s : playlist)
+        playlist_ += s;
+    res << "#EXTM3U\n"
+        << "#EXT-X-VERSION:6\n\n"
+        << "#EXT-X-MEDIA-SEQUENCE:" << to_string(index) << "\n"
+    // TODO: need to implement
+    //  << "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12.0,HOLD-BACK=3.0\n"
+    //  << "#EXT-X-PART-INF:PART-TARGET=0.33334\n"
+    //  << "#EXT-X-PROGRAM-DATE-TIME:2019-02-14T02:13:36.106Z\n"
+        << "#EXT-X-TARGETDURATION:10\n"
+        << "#EXT-X-PLAYLIST-TYPE:EVENT\n\n"
+        << playlist_;
 }
 
 /**
@@ -313,32 +278,18 @@ void fill_redis()
     {
         string key_last;
         redis.sadd("Live_master:" + name, p.to_string());
-        key_last = "Live_segment:" + name + ":" + p.get_id() + ":last_seg";
-        redis.set(key_last, "9");
         for (int j : {1, 2, 3, 4, 5, 6, 7, 8, 9})
         {
-            string key_seg = "Live_segment_data:" + name + ":" +
-                             p.get_id() + ":" + to_string(j);
-            redis.set(key_seg, segment, 60);
-            string key_dur = "Live_segment_duration:" + name + ":" +
-                             p.get_id() + ":" + to_string(j);
-            redis.set(key_dur, "5.3", 60);
+            redis.set_segment(name, p.get_id(), segment, j, 5.3);
             for (size_t k : {0, 1, 2, 3, 4})
             {
-                string key_seg = "Live_segment_data:" + name + ":" +
-                                 p.get_id() + ":" + to_string(j) +
-                                 ":" + to_string(k);
                 string seg(segment.begin() + k * segment.size() / 5,
                            segment.begin() + (k + 1) * segment.size() / 5);
-                redis.set(key_seg, seg, 60);
-                string key_dur = "Live_segment_duration:" + name + ":" +
-                                 p.get_id() + ":" + to_string(j) +
-                                 ":" + to_string(k);
-                redis.set(key_dur, "0.8", 60);
+                redis.set_partial_segment(name, p.get_id(), seg, j, k, 0.8);
             }
-            key_last = "Live_segment:" + name + ":" + p.get_id() + ":last_pseg";
-            redis.set(key_last, to_string(j) + ":4");
+            redis.set_last_partial_segment(name, p.get_id(), j, 4);
         }
+        redis.set_last_segment(name, p.get_id(), 9);
     };
     for (auto i : {1, 2, 3, 4, 5, 6})
     {
