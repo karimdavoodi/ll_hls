@@ -57,9 +57,11 @@ target_link_libraries (hls_generator
             )
 #############  hls_server
 add_executable(hls_server 
-            src/redis_client.cpp 
-            src/hls_server.cpp 
             src/hls_server_main.cpp
+            src/hls_server.cpp 
+            src/hls_manifest.cpp 
+            src/redis_client.cpp 
+            src/util.cpp 
             )
 target_include_directories(hls_server  PUBLIC 
             third_party/served/src/served

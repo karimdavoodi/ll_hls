@@ -13,7 +13,9 @@
 #include <thread>
 
 #include "config.h"
+#include "util.h"
 #include "hls_server.h"
+#include "hls_manifest.h"
 #include "hls_transcode_profile.h"
 
 using namespace std;
@@ -57,18 +59,24 @@ void Hls_server::init_routes()
     mux.use_before([&](served::response &, const served::request &req)
                    { LOG(debug) << served::method_to_string(req.method())
                                 << ":" << req.url().URI(); });
-    mux.handle("/test").get([](served::response &res, const served::request &)
-                            { res << "TEST API\n"; });
-    mux.handle(HLS_SERVER_API_BASE + "/lives_list.m3u8").get([this](served::response &res, const served::request &req)
-                                                             { return this->list_lives(res, req); });
-    mux.handle(HLS_SERVER_API_BASE + "/master/{name}/play.m3u8").get([this](served::response &res, const served::request &req)
-                                                                     { return this->master_playlist(res, req); });
-    mux.handle(HLS_SERVER_API_BASE + "/single/{name}/{profile}/play.m3u8").get([this](served::response &res, const served::request &req)
-                                                                               { return this->single_playlist(res, req); });
-    mux.handle(HLS_SERVER_API_BASE + "/segment/{name}/{profile}/{segment}").get([this](served::response &res, const served::request &req)
-                                                                                { return this->segment(res, req); });
-    mux.handle(HLS_SERVER_API_BASE + "/psegment/{name}/{profile}/{segment}/{psegment}").get([this](served::response &res, const served::request &req)
-                                                                                            { return this->psegment(res, req); });
+    mux.handle("/test")
+        .get([](served::response &res, const served::request &)
+             { res << "TEST API\n"; });
+    mux.handle(HLS_SERVER_API_BASE + "/lives_list.m3u8")
+        .get([this](served::response &res, const served::request &req)
+             { return this->list_lives(res, req); });
+    mux.handle(HLS_SERVER_API_BASE + "/master/{name}/play.m3u8")
+        .get([this](served::response &res, const served::request &req)
+             { return this->master_playlist(res, req); });
+    mux.handle(HLS_SERVER_API_BASE + "/single/{name}/{profile}/play.m3u8")
+        .get([this](served::response &res, const served::request &req)
+             { return this->single_playlist(res, req); });
+    mux.handle(HLS_SERVER_API_BASE + "/segment/{name}/{profile}/{segment}")
+        .get([this](served::response &res, const served::request &req)
+             { return this->segment(res, req); });
+    mux.handle(HLS_SERVER_API_BASE + "/psegment/{name}/{profile}/{segment}/{psegment}")
+        .get([this](served::response &res, const served::request &req)
+             { return this->psegment(res, req); });
 }
 
 /**
@@ -150,16 +158,6 @@ void Hls_server::master_playlist(served::response &res, const served::request &r
     }
     res << playlist;
 }
-inline int to_int(const string& str)
-{
-    try{
-        if(str.empty()) return -1;
-        return stoi(str);
-    }catch(...){
-        LOG(error) <<  str << " is not integer!";
-        return -1;
-    }
-}
 /**
  * @brief return single playlist of live stream with name 'name'
  * PATH: HLS_SERVER_API_BASE/single/{name}/{profile}/play.m3u8
@@ -169,13 +167,14 @@ inline int to_int(const string& str)
  */
 void Hls_server::single_playlist(served::response &res, const served::request &req)
 {
-    auto redis = get_redis();
+    RedisClient* redis = get_redis();
+    Hls_manifest manifest{redis};
     string name = req.params.get("name");
     string profile = req.params.get("profile");
 
     // find last segment and partial segment
-    auto last_seg = redis->get_last_segment(name, profile);
-    auto last_pseg = redis->get_last_partial_segment(name, profile);
+    auto last_seg = manifest.get_last_segment(name, profile);
+    auto last_pseg = manifest.get_last_partial_segment(name, profile);
     if (last_seg < 0 || last_pseg.first < 0 || last_pseg.second < 0)
     {
         LOG(error) << "Can't get last segment numbers from Redis for " << name;
@@ -184,16 +183,17 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     }
 
     // Wait if requested segment is not ready!!!
-    int hls_msn = to_int(req.query.get("_HLS_msn"));
-    int hls_part = to_int(req.query.get("_HLS_part"));
+    int hls_msn = Util::to_int(req.query.get("_HLS_msn"));
+    int hls_part = Util::to_int(req.query.get("_HLS_part"));
     if (hls_msn >= 0)
     {
         // TODO: implement in efficatin way!
         // TODO: wait only to next segment
-        if(hls_msn == last_seg + 1 ) {
+        if (hls_msn == last_seg + 1)
+        {
             while (true)
-                if (hls_msn > redis->get_last_segment(name, profile))
-                    redis->wait(0.1);
+                if (hls_msn > manifest.get_last_segment(name, profile))
+                    Util::wait_millisecond(100);
                 else
                     break;
         }
@@ -205,13 +205,13 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     // insert last segment if it is newer than partial segments
     if (last_seg >= last_pseg.first)
     {
-        playlist.push_front(redis->playlist_item_segment(name, profile, last_seg));
+        playlist.push_front(manifest.playlist_item_segment(name, profile, last_seg));
         --index;
     }
     // insert partial segments of last segment
     for (; last_pseg.second >= 0; --last_pseg.second)
     {
-        playlist.push_front(redis->playlist_item_psegment(name, profile, last_pseg));
+        playlist.push_front(manifest.playlist_item_psegment(name, profile, last_pseg));
     }
 
     // insert remain 4 main segments if hls_skip is not set
@@ -220,10 +220,10 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     {
         for (; index > 0 && index > (last_seg - 4); --index)
         {
-            playlist.push_front(redis->playlist_item_segment(name, profile, index));
+            playlist.push_front(manifest.playlist_item_segment(name, profile, index));
         }
     }
-    string first_segment_time = redis->get_segment_time(name, profile,index); 
+    string first_segment_time = manifest.get_segment_time(name, profile, index);
     // Gather playlist ...
     string playlist_;
     for (auto s : playlist)
@@ -253,7 +253,7 @@ void Hls_server::segment(served::response &res, const served::request &req)
     string profile = req.params.get("profile");
     string segment = req.params.get("segment");
     string key_data = "Live_segment_data:" + name + ":" + profile +
-        ":" + segment;
+                      ":" + segment;
     string data = get_redis()->get(key_data);
     res.set_body(data);
     res.set_header("Content-type", "video/MP2T");
@@ -274,7 +274,7 @@ void Hls_server::psegment(served::response &res, const served::request &req)
     string segment = req.params.get("segment");
     string psegment = req.params.get("psegment");
     string key_data = "Live_segment_data:" + name + ":" + profile +
-        ":" + segment + ":" + psegment;
+                      ":" + segment + ":" + psegment;
     string data = get_redis()->get(key_data);
     res.set_body(data);
     res.set_header("Content-type", "video/MP2T");
@@ -286,29 +286,30 @@ void fill_redis()
     string key_last;
     ifstream segfile("/home/karim/Videos/20.mp4", std::ios::binary);
     string segment(
-            std::istreambuf_iterator<char>(segfile), {});
+        std::istreambuf_iterator<char>(segfile), {});
     LOG(debug) << "seg data len " << segment.size();
     RedisClient redis = RedisClient{"127.0.0.1", 6379, "31233123"};
+    Hls_manifest manifest {&redis} ;
     auto P = [&](string name, Profile &p)
     {
         string key_last;
         redis.sadd("Live_master:" + name, p.to_string());
         for (int j : {1, 2, 3, 4, 5, 6, 7, 8, 9})
         {
-            redis.set_segment(name, p.get_id(), segment, j, 5.3);
+            manifest.set_segment(name, p.get_id(), segment, j, 5.3);
             for (size_t k : {0, 1, 2, 3, 4})
             {
                 string seg(segment.begin() + k * segment.size() / 5,
-                        segment.begin() + (k + 1) * segment.size() / 5);
-                redis.set_partial_segment(name, p.get_id(), seg, j, k, 0.8);
+                           segment.begin() + (k + 1) * segment.size() / 5);
+                manifest.set_partial_segment(name, p.get_id(), seg, j, k, 0.8);
             }
-            redis.set_last_partial_segment(name, p.get_id(), j, 4);
+            manifest.set_last_partial_segment(name, p.get_id(), j, 4);
         }
-        redis.set_last_segment(name, p.get_id(), 9);
+        manifest.set_last_segment(name, p.get_id(), 9);
     };
     for (auto i : {1, 2, 3, 4, 5, 6})
     {
-        string name = RedisClient::unique_name("Chan " + to_string(i));
+        string name = Util::unique_name("Chan " + to_string(i));
         LOG(info) << "Add " << name;
         redis.sadd("Lives_list", name);
         Profile p;
