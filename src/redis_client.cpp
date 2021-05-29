@@ -305,6 +305,26 @@ void RedisClient::set_last_segment(const string &name,
     set(key_last, to_string(segment_index));
 }
 /**
+ * @brief return segment date time
+ * 
+ * @param name 
+ * @param profile 
+ * @param segment_index 
+ * @return string 
+ */
+string RedisClient::get_segment_time(const string &name,
+                                     const string &profile,
+                                     int segment_index)
+{
+    string key = (boost::format("Live_segment_datetime:%s:%s:%d") % name % profile % segment_index).str();
+    string time_epotch = get(key);
+    const time_t time_e = std::stoull(time_epotch);
+    char buf[512];
+    strftime(buf, 512, "%Y-%m-%dT%H:%M:%SZ", gmtime(&time_e));
+    return string(buf);
+}
+
+/**
  * @brief set last partial segment number
  * 
  * @param name 

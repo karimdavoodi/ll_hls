@@ -1,13 +1,22 @@
 # TODO: under develope ...
 
 # ll_hls
-Cloud-Base Low-latency HLS
+Simple Cloud-Base Low-latency HLS
 
-    input --> HLS Generator cluster ----> Redis cluster ---> HLS server cluster
+    Components:
+        - HLS Generator: To transcodes/transformat/segment input stream 
+        - Redis server: As DB of HLS segments and streams info
+        - HLS server: To generate playlists and serve segments from redis
+        - Nginx server: To have TLS, Cache, .. (Optional)
+    
+
+                       
 ## Dependency
-    - C++ wrapper for ffmpeg:  https://github.com/h4tr3d/avcpp.git 
-    - C++ REST API library: https://github.com/meltwater/served.git 
-    - Redis client library: https://github.com/redis/hiredis.git
+    Clone and make this source on third_party folder:    
+        - C++ wrapper for ffmpeg:  https://github.com/h4tr3d/avcpp.git 
+        - C++ REST API library: https://github.com/meltwater/served.git 
+        - Redis client library: https://github.com/redis/hiredis.git
+
 ## Usage
 ### API
     Get playlist of all live streams in system:

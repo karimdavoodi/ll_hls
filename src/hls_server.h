@@ -40,9 +40,18 @@ class Hls_server
         ~Hls_server();
 };
 /*
- 
-     input -----> HlsGenerate --> to Redis
-                                        ---> HlsServer
+    Codecs :
+        mp3: mp4a.40.34
+        aac-lc: mp4a.40.2
+        he-aac: mp4a.40.5
+        h.264 baseline level 3.0 : avc1.66.30
+        h.264 main     level 3.0 : avc1.77.30
+        h.264 main     level 3.1 : avc1.4d001f
+        h.264 high     level 3.1 : avc1.64001f
+
+        Ex: CODECS="avc1.4d001f,mp4a.40.5"
+
+     input -----> HlsGenerate --> to Redis ---> HlsServer
                   
         key                                 type     description
         Lives_list                          list     names of lives channels     
@@ -51,9 +60,12 @@ class Hls_server
         Live_single:name:P:last_pseg        string   the last partial segment
                                                      form: "N:M"        
         Live_segment_duration:name:P:N      float    the segment duration     
+        Live_segment_datetime:name:P:N      float    the segment time     
         Live_segment_data:name:P:N          binary   the segment data     
-        Live_segment_duration:name:P:N:M   float    the partial segment
-        Live_segment_data:name:P:N:M       binary   the partial segment
+
+        Live_segment_duration:name:P:N:M   float    the partial segment duration
+        Live_segment_data:name:P:N:M       binary   the partial segment data
+        Live_segment_independ:name:P:N:M   bool     the partial segment has keyframe
 
                     P -> video_bitrate as ID
                     N -> segment sequence number 
@@ -98,6 +110,7 @@ class Hls_server
    --------------
    - GET parameter of LL-HLS:
        - _HLS_msn=<M>  server must response when the segment 'M' is ready
+       - _HLS_part=<N>  server must response when the partial segment 'M:N' is ready
        - _HLS_skip=YES|v2  request playlist delta update
    -------------
    - New TAGS

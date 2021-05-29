@@ -150,6 +150,16 @@ void Hls_server::master_playlist(served::response &res, const served::request &r
     }
     res << playlist;
 }
+inline int to_int(const string& str)
+{
+    try{
+        if(str.empty()) return -1;
+        return stoi(str);
+    }catch(...){
+        LOG(error) <<  str << " is not integer!";
+        return -1;
+    }
+}
 /**
  * @brief return single playlist of live stream with name 'name'
  * PATH: HLS_SERVER_API_BASE/single/{name}/{profile}/play.m3u8
@@ -163,19 +173,6 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     string name = req.params.get("name");
     string profile = req.params.get("profile");
 
-    // Wait if requested segment is not ready!!!
-    string hls_msn = req.query.get("_HLS_msn");
-    if (!hls_msn.empty())
-    {
-        // TODO: implement in efficatin way!
-        int hls_msn_n = stoi(hls_msn);
-        while (true)
-            if (hls_msn_n > redis->get_last_segment(name, profile))
-                redis->wait(0.1);
-            else
-                break;
-    }
-
     // find last segment and partial segment
     auto last_seg = redis->get_last_segment(name, profile);
     auto last_pseg = redis->get_last_partial_segment(name, profile);
@@ -185,6 +182,23 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
         res << "Can't get last segment numbers from Redis for " << name;
         return;
     }
+
+    // Wait if requested segment is not ready!!!
+    int hls_msn = to_int(req.query.get("_HLS_msn"));
+    int hls_part = to_int(req.query.get("_HLS_part"));
+    if (hls_msn >= 0)
+    {
+        // TODO: implement in efficatin way!
+        // TODO: wait only to next segment
+        if(hls_msn == last_seg + 1 ) {
+            while (true)
+                if (hls_msn > redis->get_last_segment(name, profile))
+                    redis->wait(0.1);
+                else
+                    break;
+        }
+    }
+
     // make playlist
     deque<string> playlist;
     int index = last_seg;
@@ -200,7 +214,7 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
         playlist.push_front(redis->playlist_item_psegment(name, profile, last_pseg));
     }
 
-    // insert remain 4 main segments if HLS_skip is not set
+    // insert remain 4 main segments if hls_skip is not set
     string hls_skip = req.query.get("_HLS_skip");
     if (hls_skip.empty())
     {
@@ -209,6 +223,7 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
             playlist.push_front(redis->playlist_item_segment(name, profile, index));
         }
     }
+    string first_segment_time = redis->get_segment_time(name, profile,index); 
     // Gather playlist ...
     string playlist_;
     for (auto s : playlist)
@@ -216,10 +231,10 @@ void Hls_server::single_playlist(served::response &res, const served::request &r
     res << "#EXTM3U\n"
         << "#EXT-X-VERSION:6\n\n"
         << "#EXT-X-MEDIA-SEQUENCE:" << to_string(index) << "\n"
-    // TODO: need to implement
-    //  << "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12.0,HOLD-BACK=3.0\n"
-    //  << "#EXT-X-PART-INF:PART-TARGET=0.33334\n"
-    //  << "#EXT-X-PROGRAM-DATE-TIME:2019-02-14T02:13:36.106Z\n"
+        // TODO: need to implement
+        //  << "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=12.0,HOLD-BACK=3.0\n"
+        //  << "#EXT-X-PART-INF:PART-TARGET=0.33334\n"
+        << "#EXT-X-PROGRAM-DATE-TIME:" << first_segment_time << "\n"
         << "#EXT-X-TARGETDURATION:10\n"
         << "#EXT-X-PLAYLIST-TYPE:EVENT\n\n"
         << playlist_;
@@ -238,7 +253,7 @@ void Hls_server::segment(served::response &res, const served::request &req)
     string profile = req.params.get("profile");
     string segment = req.params.get("segment");
     string key_data = "Live_segment_data:" + name + ":" + profile +
-                      ":" + segment;
+        ":" + segment;
     string data = get_redis()->get(key_data);
     res.set_body(data);
     res.set_header("Content-type", "video/MP2T");
@@ -259,7 +274,7 @@ void Hls_server::psegment(served::response &res, const served::request &req)
     string segment = req.params.get("segment");
     string psegment = req.params.get("psegment");
     string key_data = "Live_segment_data:" + name + ":" + profile +
-                      ":" + segment + ":" + psegment;
+        ":" + segment + ":" + psegment;
     string data = get_redis()->get(key_data);
     res.set_body(data);
     res.set_header("Content-type", "video/MP2T");
@@ -271,7 +286,7 @@ void fill_redis()
     string key_last;
     ifstream segfile("/home/karim/Videos/20.mp4", std::ios::binary);
     string segment(
-        std::istreambuf_iterator<char>(segfile), {});
+            std::istreambuf_iterator<char>(segfile), {});
     LOG(debug) << "seg data len " << segment.size();
     RedisClient redis = RedisClient{"127.0.0.1", 6379, "31233123"};
     auto P = [&](string name, Profile &p)
@@ -284,7 +299,7 @@ void fill_redis()
             for (size_t k : {0, 1, 2, 3, 4})
             {
                 string seg(segment.begin() + k * segment.size() / 5,
-                           segment.begin() + (k + 1) * segment.size() / 5);
+                        segment.begin() + (k + 1) * segment.size() / 5);
                 redis.set_partial_segment(name, p.get_id(), seg, j, k, 0.8);
             }
             redis.set_last_partial_segment(name, p.get_id(), j, 4);

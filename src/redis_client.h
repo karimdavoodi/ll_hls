@@ -35,6 +35,9 @@ public:
     // Playlist related methods
     int get_last_segment(const string &name,
                          const string &profile);
+    string get_segment_time(const string &name,
+                         const string &profile,
+                         int segment_id);
     std::pair<int, int> get_last_partial_segment(const string &name,
                                                  const string &profile);
     void set_last_segment(const string &name,

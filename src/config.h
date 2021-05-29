@@ -1,6 +1,6 @@
 #pragma once
 #define HSL_SERVER_PORT         8088
-#define HSL_SERVER_THREADS_NUM  12
+#define HSL_SERVER_THREADS_NUM  2
 #define HLS_SERVER_API_BASE     string("/v1/cs/play/llhls")
 
 #define HLS_GENERATOR_SEGMENT_LEN           6
